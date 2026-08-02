@@ -44,6 +44,12 @@ aws s3api put-public-access-block \
   --bucket throughline-tfstate-351642 \
   --public-access-block-configuration \
       BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+# Terraform 管理下のリソースには provider の default_tags が付くが、
+# このバケットだけは管理外なので手で付ける
+aws s3api put-bucket-tagging \
+  --bucket throughline-tfstate-351642 \
+  --tagging 'TagSet=[{Key=Project,Value=throughline},{Key=ManagedBy,Value=manual}]'
 ```
 
 > バケット名の `351642` はアカウント ID の下6桁。別アカウントで動かすなら
@@ -82,6 +88,19 @@ curl -sI "https://${DOMAIN}/2026-08-01/"   # 200 — ディレクトリ形式が
 curl -sI "https://${DOMAIN}/no-such-page/" # 404 — 404.html が返る
 curl -sI "http://${DOMAIN}/"               # 301 → https
 ```
+
+## タグ
+
+`main.tf` の provider `default_tags` で、**Terraform が作るすべてのリソース**に
+以下が自動で付く。個々のリソースに `tags` を書く必要はない。
+
+| Key | Value |
+|---|---|
+| `Project` | `throughline` |
+| `ManagedBy` | `terraform` |
+
+state バケットだけは Terraform 管理外のため、上のセットアップ手順で手で付けている
+(`ManagedBy = manual`)。
 
 ## 承知のうえのトレードオフ
 
