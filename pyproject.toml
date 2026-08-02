@@ -1,0 +1,46 @@
+[project]
+name = "throughline"
+version = "0.1.0"
+description = "テックニュースを、線で読む。日刊ダイジェストの生成パイプライン"
+requires-python = ">=3.13"
+
+# Lambda コンテナイメージ (issue #13) もこの依存をそのまま入れる。
+# 依存の定義はここ 1 箇所に置き、Dockerfile では重複させない。
+dependencies = [
+    "anthropic>=0.40",
+    "boto3>=1.35",
+    "feedparser>=6.0",
+    "httpx>=0.27",
+    "jinja2>=3.1",
+    "jsonschema>=4.23",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["agents", "collectors", "common", "handlers", "render"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+# ruff は Markdown 中のコードブロックも整形しにいく。docs/ は人が読む文章なので触らせない。
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
