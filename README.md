@@ -37,7 +37,22 @@ EventBridge → Step Functions
 
 各ステージは S3 上の JSON を介して疎結合。任意のステージから手動で再実行できる。
 
-## ステータス
+## 実装の進め方
 
-設計フェーズ完了。実装は Phase 1 (Terraform / S3 + CloudFront) から。
-進め方は [`docs/design.md` §13](docs/design.md) を参照。
+**[GitHub Issues](https://github.com/hystking/throughline/issues) が唯一のタスク台帳。**
+何をやるか・どこまでやれば終わりかは issue に書く。ドキュメント側には実装計画を持たない。
+
+マイルストーンは「動くものが見える」単位で切ってある。
+
+| マイルストーン | 何が確かめられるか |
+|---|---|
+| M1 サイトが見える | CloudFront のドメインでページが開く |
+| M2 記事1本が作れる | 検証を通った `article.json` が1本 |
+| M3 ローカルで通る | `./.local/site/` をブラウザで開いて読める |
+| M4 AWS で動く | 手動起動でエンドツーエンド |
+| M5 運用開始 | 毎朝自動で更新される |
+
+## 前提
+
+- AWS リージョン: **`us-east-1`** (北部バージニア)
+- 言語: Python 3.13 / インフラ: Terraform

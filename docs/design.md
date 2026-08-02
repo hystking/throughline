@@ -1,6 +1,6 @@
 # Throughline — 技術設計書
 
-- Status: **レビュー反映済み / 実装待ち** (論点は §15 で決着)
+- Status: **レビュー反映済み / 実装待ち** (論点は §14 で決着)
 - 最終更新: 2026-08-03
 - 前身: `ai-news-collector` (Claude Code Skill + Discord 配信)
 - **プロダクト定義: [`docs/product.md`](./product.md) ← 「何を作るか」はこちらが正**
@@ -129,7 +129,7 @@
 | GitHub Trending | `https://github.com/trending?since=daily` スクレイプ | **v1 では無効** (`enabled: false`)。HTML 構造の変化で壊れやすいため |
 | ~~X / Twitter~~ | — | **v1 では非対応**。前身は `bird` CLI でリストを取得していたが、Lambda 上に同等の手段がなく X API は有料。その分を公式ブログの拡充で補う。代替案は `docs/ideas.md` §B |
 
-> ⚠️ フィード URL は実装フェーズ (Phase 3) で 1 本ずつ疎通確認すること。404 / タイムアウトのフィードは個別にスキップし、全体は継続する。
+> ⚠️ フィード URL は実装時 (issue #6) に 1 本ずつ疎通確認すること。404 / タイムアウトのフィードは個別にスキップし、全体は継続する。
 
 **加工はしない。** 取得してソースごとに並べ、そのまま書き出すだけ。
 
@@ -287,7 +287,7 @@ name: throughline-researcher
 model:
   id: claude-opus-5
   effort: medium          # config/pipeline.yaml の models.research と一致させること。
-                          # 出力を見て high に上げる想定 (§15-3)
+                          # 出力を見て high に上げる想定 (§14-3)
 description: 単一のニュース記事を深掘り調査し、構造化された日本語要約を返す
 system: |
   あなたは Throughline の記者です。Throughline は「テックニュースを、線で読む」ための
@@ -422,7 +422,7 @@ config:
 - 掲載順の決定 (importance と話題の連続性を考慮)
 - 各記事の `summary_ja` は**書き換えない** (③ の成果物をそのまま使う)。編集者は「並べ方と総括」だけを担当する
 
-ツールは不要 (入力がすべて手元にある) ため、これも**エージェントではなく Messages API + Structured Outputs** で十分。ただし「関連の裏取りをさせたい」なら Managed Agents に寄せる余地あり → §15-4 で論点化。
+ツールは不要 (入力がすべて手元にある) ため、これも**エージェントではなく Messages API + Structured Outputs** で十分。ただし「関連の裏取りをさせたい」なら Managed Agents に寄せる余地あり → §14-4 で論点化。
 
 **出力**: `s3://data/runs/<date>/digest.json`
 
@@ -699,13 +699,19 @@ v1.1 (① を完成させる。docs/product.md §11)
 - `importance` は `●●●●○` のような文字表現 (画像・SVG 不要)
 - OGP メタタグは静的に埋め込む (`og:title` = headline_ja)
 
-テンプレートの詳細な文言・CSS は実装フェーズで詰める。**data schema が確定していれば後から自由に差し替え可能**というのが本設計の要点。
+テンプレートの詳細な文言・CSS は実装時 (issue #10) に詰める。**data schema が確定していれば後から自由に差し替え可能**というのが本設計の要点。
 
 ---
 
 ## 7. AWS 構成 / Terraform
 
-### 7.0 命名規則
+### 7.0 リージョンと命名規則
+
+**リージョンは `us-east-1` (北部バージニア)。**
+
+将来 独自ドメインを当てるとき、**CloudFront が使う ACM 証明書は `us-east-1` にしか置けない**。
+最初からここに寄せておけば、証明書だけ別リージョンという構成にならずに済む。
+サイトの配信は CloudFront のエッジが行い、バッチは 1 日 1 回のためユーザー向けレイテンシへの影響はない。
 
 **接頭辞は `throughline`。** すべての AWS リソース名をこれで統一する。
 
@@ -959,21 +965,7 @@ news-collector/
 
 ---
 
-## 13. 実装フェーズ
-
-| Phase | 内容 | 完了条件 |
-|---|---|---|
-| ~~**0**~~ | ~~本設計書のレビュー・確定~~ | ✅ **完了** (2026-08-03、§15 で決着) |
-| **1** | `terraform/modules/site` + ダミー HTML | CloudFront ドメインで静的ページが見える |
-| **2** | Agent / Environment 定義を `ant` CLI で作成。ローカルから 1 記事だけ Research を実行 | 妥当な `article.json` が 1 本得られる |
-| **3** | Collect / Triage をローカル実装 | `selected.json` が生成される |
-| **4** | Synthesize / Publish + テンプレート実装 | `make run-local` でローカルにサイト一式が生成される |
-| **5** | Dockerfile / ECR / Lambda / Step Functions / EventBridge を Terraform 化 | 手動起動でエンドツーエンドが通る |
-| **6** | スケジュール有効化・アラーム・数日運用して品質調整 | 毎朝自動で更新される |
-
----
-
-## 14. 将来の拡張余地
+## 13. 将来の拡張余地
 
 **→ `docs/ideas.md` に集約。** 主なもの:
 
@@ -992,30 +984,30 @@ Publish ステージに集計とページ生成を足すだけで、新しい LL
 
 ---
 
-## 15. 決定事項 (2026-08-03 レビュー済み)
+## 14. 決定事項 (2026-08-03 レビュー済み)
 
 | # | 論点 | 決定 |
 |---|---|---|
-| 15-1 | オーケストレーション | **Step Functions を採用** |
-| 15-2 | Triage / Synthesize をエージェント化するか | **しない**。Messages API の単発コールのまま |
-| 15-3 | モデルと effort | **`config/pipeline.yaml` で設定可能にする**。初期値は全ステージ `claude-opus-5` / Research は `effort: medium` |
-| 15-4 | 情報源 | **X/Twitter は除外**。代わりに**公式ブログ (RSS) を主力**として拡充。記事本数は 12 本 |
-| 15-5 | URL 形式 | **ディレクトリ形式 `/2026-08-01/`**。S3 静的ウェブサイトホスティング + CloudFront で CloudFront Function 不要 |
-| 15-6 | 記事の重複 | **統合する** (1 クラスタ = 1 セッション = 1 カード)。関連して**トレンド機能**の要望あり → `docs/ideas.md` §A |
+| 14-1 | オーケストレーション | **Step Functions を採用** |
+| 14-2 | Triage / Synthesize をエージェント化するか | **しない**。Messages API の単発コールのまま |
+| 14-3 | モデルと effort | **`config/pipeline.yaml` で設定可能にする**。初期値は全ステージ `claude-opus-5` / Research は `effort: medium` |
+| 14-4 | 情報源 | **X/Twitter は除外**。代わりに**公式ブログ (RSS) を主力**として拡充。記事本数は 12 本 |
+| 14-5 | URL 形式 | **ディレクトリ形式 `/2026-08-01/`**。S3 静的ウェブサイトホスティング + CloudFront で CloudFront Function 不要 |
+| 14-6 | 記事の重複 | **統合する** (1 クラスタ = 1 セッション = 1 カード)。関連して**トレンド機能**の要望あり → `docs/ideas.md` §A |
 
-### 15-1 の補足
+### 14-1 の補足
 
 Lambda の実行時間上限は 15 分。記事 12 本を 1 つの Lambda で順に調査すると確実に超える。
 Step Functions の `Map` なら記事 1 本 = Lambda 1 実行になり、各実行が上限内に収まる。
 加えて記事単位のリトライ・部分失敗が自然に書ける。
 
-### 15-5 の補足 (当初案からの変更)
+### 14-5 の補足 (当初案からの変更)
 
 初稿では「ディレクトリ形式には CloudFront Function が必要」としていたが、**誤り**。
 S3 の静的ウェブサイトホスティングをオリジンにすれば S3 側がインデックス解決を行う。
 ただし OAC が使えずバケットが公開読み取りになるトレードオフがある (§7.1 参照) — 内容は元々公開情報のため許容。
 
-### 15-3 の補足 — 設定の置き場所
+### 14-3 の補足 — 設定の置き場所
 
 チューニング可能な値はすべて `config/pipeline.yaml` に集約し、環境変数で上書きできるようにした (§7.6)。
 effort を上げ下げするのに**コード変更もデプロイも不要**。Lambda の環境変数を書き換えるだけで済む。
