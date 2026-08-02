@@ -1,0 +1,229 @@
+# =============================================================================
+#  Throughline — パイプライン設定
+#  「テックニュースを、線で読む。」   コンセプトは docs/product.md
+# =============================================================================
+#  * Lambda コンテナイメージに同梱される。ローカル実行でも同じファイルを読む。
+#  * すべての値は環境変数で上書き可能:
+#      AINEWS__<SECTION>__<KEY>            例: AINEWS__LIMITS__ARTICLES_MAX=8
+#      AINEWS__<SECTION>__<SUB>__<KEY>     例: AINEWS__MODELS__RESEARCH__EFFORT=high
+#    ネストは `__` 区切り。配列は JSON 文字列で渡す。
+#  * ${VAR} 形式は起動時に環境変数へ解決される (未定義なら起動失敗)。
+# =============================================================================
+
+version: 1
+
+# -----------------------------------------------------------------------------
+# 実行スケジュールと収集ウィンドウ
+# -----------------------------------------------------------------------------
+schedule:
+  timezone: Asia/Tokyo
+  publish_at: "07:00"          # EventBridge の cron はこの値から Terraform 側で導出
+  window_hours: 24             # 収集対象の時間幅
+  window_lag_minutes: 60       # 実行時刻の 60 分前をウィンドウ終端にする (公開直前の取りこぼし対策)
+
+# -----------------------------------------------------------------------------
+# モデル設定
+#   effort: low | medium | high | xhigh | max
+#   まず medium で運用し、出力を見て research を high に上げる方針 (docs/design.md §15-3)
+# -----------------------------------------------------------------------------
+models:
+  triage:
+    id: claude-opus-5
+    effort: medium             # 重複・既出・続報の判定まで担うので low では足りない
+    max_tokens: 8000
+
+  research:                    # Managed Agents の Agent 側設定を上書きするものではない。
+    id: claude-opus-5          # agents/researcher.agent.yaml と一致させること。
+    effort: medium             # 不一致を検知したら起動時に警告ログを出す。
+    max_tokens: 16000
+
+  synthesize:
+    id: claude-opus-5
+    effort: medium
+    max_tokens: 16000
+
+# -----------------------------------------------------------------------------
+# 本数・並列度・タイムアウト
+# -----------------------------------------------------------------------------
+limits:
+  candidates_max: 400                # 暴走時の安全弁。通常は 150〜250 件が素で集まる。
+                                     # 絞らず全部 Triage に渡すのが方針 (docs/design.md §4-②)
+  articles_max: 12                   # Triage が採用する記事(トピック)数
+  articles_min_success_ratio: 0.5    # 調査成功がこれを下回ったら公開せず失敗扱い
+  research_concurrency: 5            # Step Functions Map の maxConcurrency と一致させる
+  research_timeout_seconds: 660      # Lambda timeout 12min に対する余裕分
+  reactions_per_article: 3
+  related_links_per_article: 4
+  summary_chars: { min: 200, max: 300 }
+  key_points: { min: 2, max: 4 }
+
+# -----------------------------------------------------------------------------
+# Managed Agents (ID は `ant` CLI で適用後、Terraform 経由で env に注入される)
+# -----------------------------------------------------------------------------
+managed_agents:
+  researcher_agent_id: ${AGENT_ID_RESEARCHER}
+  environment_id: ${MANAGED_AGENTS_ENVIRONMENT_ID}
+  workspace_id: ${ANTHROPIC_WORKSPACE_ID}   # Console トレース URL のログ出力に使う
+  pin_agent_version: true                   # true: セッションを特定バージョンに固定 (再現性)
+  agent_version: ${AGENT_VERSION_RESEARCHER}
+
+# -----------------------------------------------------------------------------
+# 情報源  —  テクノロジー全般。AI に限定しない (docs/product.md §6)
+#   X/Twitter は Lambda 上で取得手段がないため v1 では非対応 (docs/ideas.md §B)。
+#   その分 official blog を厚くしている。
+# -----------------------------------------------------------------------------
+sources:
+
+  hackernews:
+    enabled: true
+    endpoint: "https://hn.algolia.com/api/v1/search_by_date"
+    min_points: 30
+    max_items: 50              # テック全般に広げたぶん増量。HN が汎用ソースの主力
+
+  reddit:
+    enabled: true
+    # このサーバ IP は Reddit RSS のレートが厳しい (429/空ボディ)。
+    # 1 サブレずつ間隔をあけて取得し、429 ならリトライすること。
+    # サブレ数を増やすと 1 サブレ 9 秒 × N で収集時間が伸びる点に注意
+    # (現在 16 サブレ ≒ 2.5 分。Collect Lambda の timeout 5 分に収まる範囲)。
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+    request_interval_seconds: 9
+    max_retries: 4
+    max_items_per_sub: 6
+    period: day                # .rss?t=day
+    subreddits:
+      # --- AI ---
+      - { name: ClaudeAI, category_hint: ai }
+      - { name: ClaudeCode, category_hint: ai }
+      - { name: LocalLLaMA, category_hint: ai }
+      - { name: MachineLearning, category_hint: research }
+      - { name: OpenAI, category_hint: ai }
+      # --- テック全般 ---
+      - { name: programming, category_hint: dev }
+      - { name: ExperiencedDevs, category_hint: dev }
+      - { name: devops, category_hint: infra }
+      - { name: kubernetes, category_hint: infra }
+      - { name: rust, category_hint: dev }
+      - { name: golang, category_hint: dev }
+      - { name: webdev, category_hint: web }
+      - { name: netsec, category_hint: security }
+      - { name: selfhosted, category_hint: infra }
+      - { name: databases, category_hint: data }
+      - { name: hardware, category_hint: hardware }
+
+  rss:
+    enabled: true
+    timeout_seconds: 10
+    max_items_per_feed: 8
+    # NOTE: フィード URL は実装フェーズ (Phase 3) で 1 本ずつ疎通確認すること。
+    #       404/タイムアウトのフィードは個別にスキップし、全体は継続する。
+    #       category_hint は Triage への助言であって強制ではない。
+    feeds:
+
+      # ===== AI: ラボ・モデルベンダー公式 =====
+      - { name: "Anthropic",          url: "https://www.anthropic.com/rss.xml", category_hint: ai }
+      - { name: "OpenAI",             url: "https://openai.com/blog/rss.xml", category_hint: ai }
+      - { name: "Google DeepMind",    url: "https://deepmind.google/blog/rss.xml", category_hint: ai }
+      - { name: "Google Research",    url: "https://research.google/blog/rss/", category_hint: research }
+      - { name: "Meta AI",            url: "https://ai.meta.com/blog/rss/", category_hint: ai }
+      - { name: "Microsoft Research", url: "https://www.microsoft.com/en-us/research/feed/", category_hint: research }
+      - { name: "Mistral AI",         url: "https://mistral.ai/news/feed.xml", category_hint: ai }
+      - { name: "Hugging Face",       url: "https://huggingface.co/blog/feed.xml", category_hint: ai }
+      - { name: "vLLM",               url: "https://blog.vllm.ai/feed.xml", category_hint: ai }
+      - { name: "PyTorch",            url: "https://pytorch.org/feed.xml", category_hint: ai }
+
+      # ===== クラウド・インフラ =====
+      - { name: "AWS News",           url: "https://aws.amazon.com/blogs/aws/feed/", category_hint: infra }
+      - { name: "Google Cloud",       url: "https://cloudblog.withgoogle.com/rss/", category_hint: infra }
+      - { name: "Cloudflare",         url: "https://blog.cloudflare.com/rss/", category_hint: infra }
+      - { name: "Kubernetes",         url: "https://kubernetes.io/feed.xml", category_hint: infra }
+      - { name: "CNCF",               url: "https://www.cncf.io/feed/", category_hint: infra }
+      - { name: "HashiCorp",          url: "https://www.hashicorp.com/blog/feed.xml", category_hint: infra }
+      - { name: "Docker",             url: "https://www.docker.com/blog/feed/", category_hint: infra }
+
+      # ===== 開発ツール・言語 =====
+      - { name: "GitHub",             url: "https://github.blog/feed/", category_hint: dev }
+      - { name: "Rust Blog",          url: "https://blog.rust-lang.org/feed.xml", category_hint: dev }
+      - { name: "Go Blog",            url: "https://go.dev/blog/feed.atom", category_hint: dev }
+      - { name: "Python Insider",     url: "https://blog.python.org/feeds/posts/default", category_hint: dev }
+      - { name: "Node.js",            url: "https://nodejs.org/en/feed/blog.xml", category_hint: dev }
+
+      # ===== Web・ブラウザ =====
+      - { name: "Chrome Developers",  url: "https://developer.chrome.com/static/blog/feed.xml", category_hint: web }
+      - { name: "WebKit",             url: "https://webkit.org/feed/", category_hint: web }
+      - { name: "Mozilla Hacks",      url: "https://hacks.mozilla.org/feed/", category_hint: web }
+      - { name: "Vercel",             url: "https://vercel.com/atom", category_hint: web }
+
+      # ===== データ =====
+      - { name: "PostgreSQL",         url: "https://www.postgresql.org/news.rss", category_hint: data }
+      - { name: "DuckDB",             url: "https://duckdb.org/feed.xml", category_hint: data }
+      - { name: "ClickHouse",         url: "https://clickhouse.com/blog/rss.xml", category_hint: data }
+
+      # ===== エンジニアリング事例・分析・ニュースレター =====
+      - { name: "Simon Willison",     url: "https://simonwillison.net/atom/everything/", category_hint: null }
+      - { name: "The Pragmatic Engineer", url: "https://blog.pragmaticengineer.com/rss/", category_hint: business }
+      - { name: "Import AI",          url: "https://importai.substack.com/feed", category_hint: ai }
+      - { name: "Netflix Tech Blog",  url: "https://netflixtechblog.com/feed", category_hint: infra }
+      - { name: "Stripe Engineering", url: "https://stripe.com/blog/feed.rss", category_hint: dev }
+      - { name: "Changelog",          url: "https://changelog.com/feed", category_hint: null }
+
+  github_trending:
+    enabled: false             # v1 では無効。HTML スクレイプで壊れやすいため
+    languages: [python, typescript, rust, go]
+
+# -----------------------------------------------------------------------------
+# 選別 (Triage)
+#   重複排除・既出判定・スコアリングはすべて Triage の LLM 判断に委ねる。
+#   Collect 側での機械的な前処理は行わない (docs/design.md §4-①)。
+# -----------------------------------------------------------------------------
+triage:
+  recent_retention_days: 14    # state/index.json で記事一覧を保持する日数。既出判定と続報検出に使う
+  # カテゴリ配分の監視 (docs/product.md §6: 「AI が半分弱、それ以外が半分強」)
+  # 採用結果がこの範囲を外れたら警告ログを出す。自動で是正はしない。
+  warn_if_ai_ratio_above: 0.6
+  warn_if_distinct_categories_below: 3
+
+# -----------------------------------------------------------------------------
+# サイト生成
+# -----------------------------------------------------------------------------
+site:
+  name: "Throughline"
+  tagline: "テックニュースを、線で読む。"
+  description: "毎朝5分。テックニュースを点ではなく線で読めるようにする日刊ダイジェスト。"
+  lang: ja
+  author: gon
+  archive_page_size: 60        # アーカイブ一覧に載せる日数
+  feed_items: 30               # feed.xml に載せる日数
+  show_confidence_badge: true  # confidence が high 以外の記事に印を出す
+  reading_budget_minutes: 5    # docs/product.md ④ の制約。超過したら警告ログ
+  categories:                  # 表示名。schemas/article.schema.json の enum と 1:1 対応させること
+    ai:       "AI・機械学習"
+    dev:      "開発ツール・言語"
+    infra:    "クラウド・インフラ"
+    web:      "Web・ブラウザ"
+    data:     "データ"
+    security: "セキュリティ"
+    hardware: "ハードウェア"
+    business: "業界・ビジネス"
+    research: "研究・論文"
+    other:    "その他"
+
+# -----------------------------------------------------------------------------
+# ストレージ (Terraform の出力を env 経由で受け取る)
+# -----------------------------------------------------------------------------
+storage:
+  backend: s3                  # s3 | local  (ローカル実行時は AINEWS__STORAGE__BACKEND=local)
+  data_bucket: ${DATA_BUCKET}
+  site_bucket: ${SITE_BUCKET}
+  cloudfront_distribution_id: ${CLOUDFRONT_DISTRIBUTION_ID}
+  local_root: "./.local"
+
+# -----------------------------------------------------------------------------
+# 観測性
+# -----------------------------------------------------------------------------
+observability:
+  log_level: INFO
+  log_format: json
+  emit_cloudwatch_metrics: true
+  metric_namespace: AINewsCollector
+  log_session_trace_url: true  # Managed Agents の Console トレース URL をログに出す
