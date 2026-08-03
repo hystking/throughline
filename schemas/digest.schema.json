@@ -129,10 +129,12 @@
         },
         "usage": {
           "type": "object",
-          "description": "この記事 1 本にかかったトークン数",
+          "description": "この記事 1 本にかかったトークン数。セッション内は履歴が使い回されるので、キャッシュ分を数えないと実態からかけ離れる",
           "properties": {
             "input_tokens": { "type": "integer", "minimum": 0 },
-            "output_tokens": { "type": "integer", "minimum": 0 }
+            "output_tokens": { "type": "integer", "minimum": 0 },
+            "cache_creation_input_tokens": { "type": "integer", "minimum": 0 },
+            "cache_read_input_tokens": { "type": "integer", "minimum": 0 }
           }
         }
       }
