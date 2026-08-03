@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://throughline.dev/schemas/index.schema.json",
+  "title": "Index",
+  "description": "state/index.json — パイプライン唯一の永続状態 (docs/design.md §5.3)。日付の降順に並んだ配列 1 本で、既出判定 / アーカイブ / RSS の 3 用途を賄う。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["updated_at", "days"],
+  "properties": {
+    "updated_at": { "$ref": "digest.schema.json#/$defs/timestamp" },
+    "days": {
+      "type": "array",
+      "description": "日付の降順。Publish が先頭に当日を差し込む",
+      "items": { "$ref": "#/$defs/day" }
+    }
+  },
+
+  "$defs": {
+    "day": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "headline_ja", "lead_ja", "article_count"],
+      "properties": {
+        "date": { "$ref": "digest.schema.json#/$defs/date" },
+        "headline_ja": { "type": "string" },
+        "lead_ja": { "type": "string" },
+        "article_count": { "type": "integer", "minimum": 0 },
+        "articles": {
+          "type": "array",
+          "description": "直近 triage.recent_retention_days (既定 14) 日ぶんだけ保持する。それより古い日はこのキーごと落として上の 4 フィールドだけ残す",
+          "items": { "$ref": "#/$defs/day_article" }
+        }
+      }
+    },
+    "day_article": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Triage のプロンプトに載る最小限。ここを太らせるとトークンがそのまま増える",
+      "required": ["id", "title_ja", "url", "category"],
+      "properties": {
+        "id": { "$ref": "digest.schema.json#/$defs/article_id" },
+        "title_ja": { "type": "string" },
+        "url": { "type": "string" },
+        "category": { "$ref": "article.schema.json#/properties/category" },
+        "tags": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
