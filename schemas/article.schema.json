@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://throughline.dev/schemas/article.schema.json",
+  "title": "Article",
+  "description": "Research (docs/design.md §4-③) の成果物。custom tool `submit_article` の input_schema としてそのまま使う。ここにはエージェントが書くフィールドだけを置く — id / collected_at / session_id / agent_version / source_mentions / usage は Lambda が後から付与するもので、digest.schema.json の $defs.lambda_fields 側で定義する。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "title_ja",
+    "url",
+    "category",
+    "importance",
+    "summary_ja",
+    "key_points",
+    "actionable_ja",
+    "confidence"
+  ],
+  "properties": {
+    "title_ja": {
+      "type": "string",
+      "description": "日本語見出し。40字以内。体言止め可"
+    },
+    "title_original": {
+      "type": "string",
+      "description": "原題"
+    },
+    "url": {
+      "type": "string",
+      "description": "最も一次に近いソース URL"
+    },
+    "category": {
+      "type": "string",
+      "description": "config/pipeline.yaml の site.categories と 1:1 対応",
+      "enum": [
+        "ai",
+        "dev",
+        "infra",
+        "web",
+        "data",
+        "security",
+        "hardware",
+        "business",
+        "research",
+        "other"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": { "type": "string" },
+      "description": "トピックページの軸になる。既知タグを優先し、なければ新規"
+    },
+    "importance": {
+      "type": "integer",
+      "enum": [1, 2, 3, 4, 5],
+      "description": "5 が最重要"
+    },
+
+    "summary_ja": {
+      "type": "string",
+      "description": "約束④「数分で理解できる」。200〜300字。何が起きたかを一読で把握できること"
+    },
+    "key_points": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": { "type": "string" },
+      "description": "約束④。記事に書いてある事実のみ。憶測を混ぜない"
+    },
+
+    "narrative_ja": {
+      "type": ["string", "null"],
+      "description": "約束①「線で読める」/ サイト上の『この流れ』。この出来事が何の続きなのかを1文で。過去の関連する動きが確認できなかった場合は null"
+    },
+    "narrative_refs": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "narrative_ja の根拠になる過去の出来事",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["what", "when"],
+        "properties": {
+          "what": { "type": "string", "description": "何が起きたか (30字以内)" },
+          "when": {
+            "type": "string",
+            "description": "YYYY-MM-DD または『7月下旬』のような粒度"
+          },
+          "url": { "type": "string" }
+        }
+      }
+    },
+
+    "actionable_ja": {
+      "type": "string",
+      "description": "約束②「すぐに活かせる」/ サイト上の『明日から』。実務にどう効くかを1〜2文。要約の言い換えは禁止。『で、どうする』まで書く"
+    },
+    "try_it": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "約束②。今すぐ試せる場所 (リポジトリ / ドキュメント / プレイグラウンド)。無ければ null",
+      "required": ["label", "url"],
+      "properties": {
+        "label": { "type": "string" },
+        "url": { "type": "string" }
+      }
+    },
+
+    "insider_ja": {
+      "type": ["string", "null"],
+      "description": "約束③「他人に自慢できる」/ サイト上の『ここだけの話』。記事本文に書かれていない前提・数字の読み方・見落とされている点を1〜2文。無理に作らず、無ければ null"
+    },
+    "reactions": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "約束③。実在するコメントのみ。創作は禁止 (docs/product.md §12 の最重要チェック項目)",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["platform", "quote_ja", "url"],
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": ["hackernews", "reddit", "x", "github", "other"]
+          },
+          "author": { "type": "string" },
+          "quote_ja": {
+            "type": "string",
+            "description": "コメントの要旨 (日本語, 80字以内)"
+          },
+          "url": { "type": "string" }
+        }
+      }
+    },
+    "related_links": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "url"],
+        "properties": {
+          "title": { "type": "string" },
+          "url": { "type": "string" },
+          "kind": {
+            "type": "string",
+            "enum": ["primary_source", "paper", "repo", "coverage", "discussion"]
+          }
+        }
+      }
+    },
+
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    }
+  }
+}

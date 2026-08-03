@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://throughline.dev/schemas/digest.schema.json",
+  "title": "Digest",
+  "description": "Synthesize (docs/design.md §4-④) の成果物。runs/<date>/digest.json。Publish はこれ 1 本だけを読んでサイトを作る。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "date",
+    "generated_at",
+    "headline_ja",
+    "lead_ja",
+    "themes",
+    "article_order",
+    "articles",
+    "stats",
+    "cost"
+  ],
+  "properties": {
+    "date": {
+      "$ref": "#/$defs/date",
+      "description": "この digest の日付。runs/<date>/ と公開 URL /<date>/ に一致する"
+    },
+    "generated_at": { "$ref": "#/$defs/timestamp" },
+    "headline_ja": {
+      "type": "string",
+      "description": "本日の見出し。30字程度"
+    },
+    "lead_ja": {
+      "type": "string",
+      "description": "リード文。3〜4文"
+    },
+    "themes": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "約束①「線で読める」の日次版。複数記事にまたがる潮流を 1〜3 個。束ねるべき潮流が無い日 (記事が1本しかない等) は空でよい — 無理に作らせない",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "body_ja", "article_ids"],
+        "properties": {
+          "title": { "type": "string" },
+          "body_ja": { "type": "string" },
+          "article_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/article_id" }
+          }
+        }
+      }
+    },
+    "article_order": {
+      "type": "array",
+      "description": "掲載順。articles[] の id を過不足なく並べる (重複禁止)",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/article_id" }
+    },
+    "articles": {
+      "type": "array",
+      "description": "調査に成功した記事。エージェントが書いた本体は article.schema.json で検証済みなので、ここでは Lambda が付与するフィールドだけを見る (common.validate.validate_stored_article が両方を通す)",
+      "items": { "$ref": "#/$defs/lambda_fields" }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidates", "selected", "researched", "failed"],
+      "properties": {
+        "candidates": { "type": "integer", "minimum": 0 },
+        "selected": { "type": "integer", "minimum": 0 },
+        "researched": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_tokens", "output_tokens", "usd_estimate"],
+      "description": "docs/design.md §10。1 回の実行コストがログから分かること",
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "usd_estimate": { "type": "number", "minimum": 0 }
+      }
+    }
+  },
+
+  "$defs": {
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "UTC の ISO 8601 (秒精度)",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "article_id": {
+      "type": "string",
+      "description": "Triage が primary_seq の URL から作る SHA1 先頭 12 桁 (docs/design.md §4-②)",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "lambda_fields": {
+      "type": "object",
+      "description": "article.schema.json に対して Lambda が付け足すフィールド (docs/design.md §5.1 末尾)。エージェントには書かせないので article.schema.json には入れない。ここは閉じない — 残りのフィールドは article.schema.json 側の責任",
+      "required": ["id", "collected_at", "session_id", "agent_version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/article_id" },
+        "collected_at": { "$ref": "#/$defs/timestamp" },
+        "session_id": {
+          "type": "string",
+          "description": "Managed Agents のセッション ID。Console のトレースに突き合わせる"
+        },
+        "agent_version": {
+          "type": ["string", "integer"],
+          "description": "使った Agent 設定のバージョン。出力品質の変化を追えるように残す"
+        },
+        "source_mentions": {
+          "type": "array",
+          "description": "Triage が 1 本に統合した候補のソース一覧",
+          "items": {
+            "type": "object",
+            "required": ["source", "url"],
+            "properties": {
+              "source": { "type": "string" },
+              "url": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "description": "この記事 1 本にかかったトークン数",
+          "properties": {
+            "input_tokens": { "type": "integer", "minimum": 0 },
+            "output_tokens": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}
