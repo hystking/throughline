@@ -43,9 +43,15 @@ save() {
     echo "# make agents-apply が書いた。手で書かない。"
     echo "# config/pipeline.yaml の managed_agents.* がこの値を \${VAR} で参照する。"
     echo "MANAGED_AGENTS_ENVIRONMENT_ID=${MANAGED_AGENTS_ENVIRONMENT_ID:-}"
-    [ -n "${AGENT_ID_RESEARCHER:-}" ] && echo "AGENT_ID_RESEARCHER=$AGENT_ID_RESEARCHER"
-    [ -n "${AGENT_VERSION_RESEARCHER:-}" ] && echo "AGENT_VERSION_RESEARCHER=$AGENT_VERSION_RESEARCHER"
+    if [ -n "${AGENT_ID_RESEARCHER:-}" ]; then
+      echo "AGENT_ID_RESEARCHER=$AGENT_ID_RESEARCHER"
+    fi
+    if [ -n "${AGENT_VERSION_RESEARCHER:-}" ]; then
+      echo "AGENT_VERSION_RESEARCHER=$AGENT_VERSION_RESEARCHER"
+    fi
   } >"$ENV_FILE"
+  # `[ ... ] && echo` で終わると Agent 未作成のとき 1 を返し、set -e に殺される
+  return 0
 }
 
 # --- Environment -------------------------------------------------------------
