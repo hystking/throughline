@@ -1,0 +1,21 @@
+# =============================================================================
+#  Throughline — Research セッションの実行環境 (Claude Managed Agents)
+#  docs/design.md §4-③ / issue #4
+# =============================================================================
+#  適用:  make agents-apply     (中身は ant beta:environments create|update)
+#  単体:  ant beta:environments create < agents/research.environment.yaml
+#
+#  Environment は Agent と独立した再利用可能なリソース。Synthesize を
+#  エージェント化する日が来ても、同じものを使い回す。
+# =============================================================================
+
+name: throughline-research-env
+
+description: Throughline の記事調査セッション用。web_fetch でどこへでも出られる cloud 環境
+
+config:
+  type: cloud
+  networking:
+    # web_fetch の対象ドメインを事前に列挙できない (毎朝どのサイトが来るか分からない)
+    # ため unrestricted。コンテナ側に秘密は一切置かない前提で許容している。
+    type: unrestricted
