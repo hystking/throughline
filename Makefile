@@ -24,7 +24,9 @@ test:  ## pytest
 # --- Managed Agents (docs/design.md §4-③) -----------------------------------
 # Agent / Environment は ant CLI で YAML から適用する (コントロールプレーン)。
 # セッション作成は Lambda が SDK で行う (データプレーン)。
-# 適用後の ID / version は .env.agents に落ちる。README「Managed Agents の適用」参照。
+# 適用後の ID / version は .env.agents に落ちる (git 管理外)。
+# pin_agent_version の間セッションはその version に固定されるので、
+# プロンプトを直したら agents-apply → 新しい version を控える、までがワンセット。
 
 agents-sync:  ## agents/researcher.agent.yaml の input_schema を schemas/ に揃える
 	$(UV) run python scripts/sync_agent_schema.py
