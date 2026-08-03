@@ -36,6 +36,18 @@ if [ -f "$ENV_FILE" ]; then
   . "$ENV_FILE"
 fi
 
+# 控えは「作れたところまで」を都度書く。途中で失敗したときに ID を取りこぼすと、
+# 次の実行が名前重複 (409) で詰まり、コンソールから拾い直す羽目になる。
+save() {
+  {
+    echo "# make agents-apply が書いた。手で書かない。"
+    echo "# config/pipeline.yaml の managed_agents.* がこの値を \${VAR} で参照する。"
+    echo "MANAGED_AGENTS_ENVIRONMENT_ID=${MANAGED_AGENTS_ENVIRONMENT_ID:-}"
+    [ -n "${AGENT_ID_RESEARCHER:-}" ] && echo "AGENT_ID_RESEARCHER=$AGENT_ID_RESEARCHER"
+    [ -n "${AGENT_VERSION_RESEARCHER:-}" ] && echo "AGENT_VERSION_RESEARCHER=$AGENT_VERSION_RESEARCHER"
+  } >"$ENV_FILE"
+}
+
 # --- Environment -------------------------------------------------------------
 if [ -n "${MANAGED_AGENTS_ENVIRONMENT_ID:-}" ]; then
   echo "==> environment update ($MANAGED_AGENTS_ENVIRONMENT_ID)" >&2
@@ -48,6 +60,7 @@ else
     "$ANT" beta:environments create --transform id -r <agents/research.environment.yaml
   )
 fi
+save
 
 # --- Agent -------------------------------------------------------------------
 # input_schema が schemas/ とずれたまま適用しない
@@ -71,13 +84,7 @@ else
 fi
 
 # --- 控える ------------------------------------------------------------------
-cat >"$ENV_FILE" <<EOF
-# make agents-apply が書いた。手で書かない。
-# config/pipeline.yaml の managed_agents.* がこの値を \${VAR} で参照する。
-MANAGED_AGENTS_ENVIRONMENT_ID=$MANAGED_AGENTS_ENVIRONMENT_ID
-AGENT_ID_RESEARCHER=$AGENT_ID_RESEARCHER
-AGENT_VERSION_RESEARCHER=$AGENT_VERSION_RESEARCHER
-EOF
+save
 
 echo >&2
 echo "適用した。$ENV_FILE に控えた:" >&2
