@@ -1,0 +1,315 @@
+# =============================================================================
+#  Throughline — Research エージェント (Claude Managed Agents)
+#  docs/design.md §4-③ / issue #4
+# =============================================================================
+#  適用:  make agents-apply     (中身は ant beta:agents create|update)
+#  単体:  ant beta:agents create < agents/researcher.agent.yaml
+#
+#  * このファイルが Agent 設定の唯一の出どころ。`agents.create()` をコードから
+#    呼ばない (孤児 Agent が溜まり、バージョニングの意味も失われる)。
+#  * model.id / model.effort は config/pipeline.yaml の models.research と
+#    一致させること。実際に使われるのは**こちら側**。
+#  * tools[1].input_schema は schemas/article.schema.json の丸写し。
+#    手で書き換えず `make agents-sync` で同期する (tests/test_agents.py が見張る)。
+# =============================================================================
+
+name: throughline-researcher
+
+model:
+  id: claude-opus-5
+  effort: medium
+
+description: 単一のニュース記事を深掘り調査し、構造化された日本語要約を返す
+
+system: |
+  あなたは Throughline の記者です。Throughline は「テックニュースを、線で読む」ための
+  日刊ダイジェストで、読者は現役のソフトウェアエンジニアです。
+  与えられた 1 本のニュースを調査し、`submit_article` で結果を提出することが
+  あなたの唯一の仕事です。
+
+  対象領域は AI に限りません。開発ツール・言語・クラウド・インフラ・Web・データ・
+  セキュリティ・ハードウェア・業界動向・研究、いずれも同じ基準で扱ってください。
+
+  ## Throughline が読者に約束していること
+  あなたが書く内容は、すべてこの4つのどれかに奉仕しなければなりません。
+  ① 線で読める     — この出来事が「何の続き」なのかがわかる
+  ② すぐに活かせる  — 自分の仕事に何が効くのかがわかる
+  ③ 自慢できる     — 人に話したくなる厚みがある
+  ④ 数分で理解できる — 30秒で読める
+
+  ## 手順 (必ずこの順で)
+  1. 記事本体の URL を web_fetch で取得し、本文を読む。取得できない場合は
+     web_search でミラーや二次報道を探す。
+  2. discussion_url (Hacker News / Reddit) があれば web_fetch し、
+     上位コメントから技術的に鋭い指摘・反論・追加情報を拾う。→ ③
+  3. web_search で以下を確認する:
+     - 一次ソース (公式ブログ / 論文 / リポジトリ) が別にあるか
+     - 事実関係の裏取り (数値, ベンチマーク, 発表主体)
+     - **この出来事の前に何があったか。直近数週間の関連する動き** → ①
+       (例: 競合の同種の発表、前バージョン、これを引き起こした事件)
+       入力に `<continues>` があれば、それを起点に裏取りする。無ければゼロから探す。
+  4. 調べた内容を統合し `submit_article` を呼ぶ。
+
+  ## 各フィールドの書き方
+  - summary_ja (④): 200〜300字。読者が「何が起きたか」を一読で把握できること。
+  - key_points (④): 2〜4個。記事に書いてある事実のみ。憶測を混ぜない。
+  - narrative_ja (①): この出来事が何の続きなのかを1文で。
+      良い例:「7月下旬にA社が打ち出した値下げに、B社が同水準で追随した形」
+      悪い例:「業界では競争が激化している」← 具体的な出来事を指していない
+      **手順3で具体的な過去の出来事を特定できなかった場合は null を返すこと。**
+      根拠は narrative_refs に入れる。
+  - actionable_ja (②): 実務にどう効くかを1〜2文。要約の言い換えは禁止。
+      「で、どうする」まで書く。影響がない読者が多いなら、正直にそう書いてよい。
+  - try_it (②): 今すぐ試せる URL があれば。無ければ null。
+  - insider_ja (③): 記事本文に書かれていない前提・数字の読み方・見落とされている点。
+      **ひねり出せない場合は null。** 埋めるために憶測を書くことは禁止。
+  - reactions (③): 実在するコメントの要旨。引用元 URL を必ず付ける。
+  - tags: トピックページの軸になる。表記を安定させる
+      (「LLM」と「大規模言語モデル」を混在させない。英語表記を優先)。
+  - confidence: 確認できなかった事項があれば下げる。理由は本文に書かず、confidence だけで示す。
+
+  ## 文体
+  - 技術用語は原語のまま残してよい (inference, fine-tuning)。無理な訳語は避ける。
+  - 断定できることは断定する。曖昧な逃げを書かない。
+  - 煽らない。「衝撃」「ヤバい」は使わない。
+
+  ## 禁止事項 (最重要)
+  - submit_article を呼ばずにターンを終えること
+  - 一次ソースを読まずに要約すること
+  - **存在しないコメント・発言を作ること**
+  - **記事に存在しない数値・固有名詞を書くこと**
+  - narrative_ja / insider_ja を埋めるために憶測を書くこと (null を返すのが正解)
+
+tools:
+  # 組み込みツール一式。bash だけ落とす — スクラッチは要らないし攻撃面を減らせる。
+  - type: agent_toolset_20260401
+    default_config: { enabled: true }
+    configs:
+      - { name: bash, enabled: false }
+
+  # 構造化出力の受け口。Managed Agents には output_config.format が無いので
+  # custom tool の input_schema で形を保証する (docs/design.md §4-③)。
+  - type: custom
+    name: submit_article
+    description: 調査結果を提出する。1 セッションにつき 1 回だけ呼ぶこと。
+    # >>> ここから下は schemas/article.schema.json の写し。make agents-sync が上書きする >>>
+    input_schema:
+      {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://throughline.dev/schemas/article.schema.json",
+        "title": "Article",
+        "description": "Research (docs/design.md §4-③) の成果物。custom tool `submit_article` の input_schema としてそのまま使う。ここにはエージェントが書くフィールドだけを置く — id / collected_at / session_id / agent_version / source_mentions / usage は Lambda が後から付与するもので、digest.schema.json の $defs.lambda_fields 側で定義する。",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title_ja",
+          "url",
+          "category",
+          "importance",
+          "summary_ja",
+          "key_points",
+          "actionable_ja",
+          "confidence"
+        ],
+        "properties": {
+          "title_ja": {
+            "type": "string",
+            "description": "日本語見出し。40字以内。体言止め可"
+          },
+          "title_original": {
+            "type": "string",
+            "description": "原題"
+          },
+          "url": {
+            "type": "string",
+            "description": "最も一次に近いソース URL"
+          },
+          "category": {
+            "type": "string",
+            "description": "config/pipeline.yaml の site.categories と 1:1 対応",
+            "enum": [
+              "ai",
+              "dev",
+              "infra",
+              "web",
+              "data",
+              "security",
+              "hardware",
+              "business",
+              "research",
+              "other"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 5,
+            "items": {
+              "type": "string"
+            },
+            "description": "トピックページの軸になる。既知タグを優先し、なければ新規"
+          },
+          "importance": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "description": "5 が最重要"
+          },
+          "summary_ja": {
+            "type": "string",
+            "description": "約束④「数分で理解できる」。200〜300字。何が起きたかを一読で把握できること"
+          },
+          "key_points": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            },
+            "description": "約束④。記事に書いてある事実のみ。憶測を混ぜない"
+          },
+          "narrative_ja": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "約束①「線で読める」/ サイト上の『この流れ』。この出来事が何の続きなのかを1文で。過去の関連する動きが確認できなかった場合は null"
+          },
+          "narrative_refs": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "narrative_ja の根拠になる過去の出来事",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "what",
+                "when"
+              ],
+              "properties": {
+                "what": {
+                  "type": "string",
+                  "description": "何が起きたか (30字以内)"
+                },
+                "when": {
+                  "type": "string",
+                  "description": "YYYY-MM-DD または『7月下旬』のような粒度"
+                },
+                "url": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "actionable_ja": {
+            "type": "string",
+            "description": "約束②「すぐに活かせる」/ サイト上の『明日から』。実務にどう効くかを1〜2文。要約の言い換えは禁止。『で、どうする』まで書く"
+          },
+          "try_it": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "description": "約束②。今すぐ試せる場所 (リポジトリ / ドキュメント / プレイグラウンド)。無ければ null",
+            "required": [
+              "label",
+              "url"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          "insider_ja": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "約束③「他人に自慢できる」/ サイト上の『ここだけの話』。記事本文に書かれていない前提・数字の読み方・見落とされている点を1〜2文。無理に作らず、無ければ null"
+          },
+          "reactions": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "約束③。実在するコメントのみ。創作は禁止 (docs/product.md §12 の最重要チェック項目)",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "platform",
+                "quote_ja",
+                "url"
+              ],
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "hackernews",
+                    "reddit",
+                    "x",
+                    "github",
+                    "other"
+                  ]
+                },
+                "author": {
+                  "type": "string"
+                },
+                "quote_ja": {
+                  "type": "string",
+                  "description": "コメントの要旨 (日本語, 80字以内)"
+                },
+                "url": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "related_links": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "url"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "primary_source",
+                    "paper",
+                    "repo",
+                    "coverage",
+                    "discussion"
+                  ]
+                }
+              }
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          }
+        }
+      }
