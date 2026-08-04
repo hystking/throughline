@@ -117,7 +117,19 @@
 
 ### ① Collect — 機械的な候補収集
 
-**入力**: 実行日時 → 収集ウィンドウ `[前日 06:00 JST, 当日 06:00 JST)` を確定 (24h)
+**入力**: `date` → 収集ウィンドウ `[前日 06:00 JST, 当日 06:00 JST)` を確定 (24h)
+
+`date` は **公開日** (JST)。収集対象日ではない。`runs/<date>/` もサイトの `/<date>/` も
+この値で、全ステージを通して意味は 1 つ。
+
+ウィンドウは `config/pipeline.yaml` の `schedule` から機械的に導く:
+
+- 終端 `to` = `date` の `publish_at` − `window_lag_minutes` (`07:00 − 60min` = **当日 06:00 JST**)
+- 始端 `from` = `to` − `window_hours` (**前日 06:00 JST**)
+
+`date: 2026-08-01` なら `[2026-07-30T21:00:00Z, 2026-07-31T21:00:00Z)`。
+終端は必ず公開時刻より前に来る (まだ存在しない記事は集められない)。
+`date` 当日の 06:00 JST 以降に出た記事は翌日の号に回る。
 
 **ソース** (すべて時刻フィルタ付きで機械的に取得。**実際のフィード一覧は `config/pipeline.yaml` の `sources` が正**):
 
@@ -142,8 +154,9 @@ URL 正規化・短縮 URL 展開・重複排除・既出判定・キーワー�
 ```jsonc
 // runs/<date>/candidates.json
 {
-  "date": "2026-08-01",
-  "window": { "from": "2026-07-31T21:00:00Z", "to": "2026-08-01T21:00:00Z" },
+  "date": "2026-08-01",   // 公開日 (JST)
+  // [前日 06:00 JST, 当日 06:00 JST) を UTC で表したもの
+  "window": { "from": "2026-07-30T21:00:00Z", "to": "2026-07-31T21:00:00Z" },
   "candidates": [
     { "seq": 1, "kind": "hackernews", "title": "...", "url": "https://...",
       "published_at": "...", "score": 842, "num_comments": 391,
